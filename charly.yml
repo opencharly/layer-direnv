@@ -36,6 +36,7 @@ direnv:
               command: /usr/bin/direnv version
             - check: the bash shell-init drop-in EVALs the direnv hook so .envrc loads on directory change (a check-for-eval typo would silently break the hook and spam every login shell with a command-not-found error)
               file:
+                # candy name is direnv, not layer-direnv — the shell: schema emits charly-direnv-*
                 file: /etc/profile.d/charly-direnv-bash.sh
                 exists: true
                 contains:
