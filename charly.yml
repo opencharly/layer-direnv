@@ -59,11 +59,11 @@ direnv:
               id: direnv-no-sh-dropin
               exit_status: 0
               command: test ! -e /etc/profile.d/charly-direnv-sh.sh
-            - check: the bash drop-in is inert when sourced by a zsh-family shell and vice versa (the guard's job) — sourcing the zsh drop-in under bash and the bash drop-in under sh must produce zero errors, which is only true if each drop-in is shell-guarded
-              id: direnv-guards-cross-shell
+            - check: the zsh drop-in is guarded to zsh — sourcing it under bash must produce zero errors (the zsh body uses zsh-only syntax, so an unguarded drop-in errors under bash; this is the observable cross-shell regression)
+              id: direnv-zsh-guard-inert-under-bash
               stdout:
                 - equals: "0"
-              command: bash -c '. /etc/profile.d/charly-direnv-zsh.sh 2>&1; . /etc/profile.d/charly-direnv-bash.sh 2>&1' | grep -cE 'not found|syntax error|unknown target' || true
+              command: bash -c '. /etc/profile.d/charly-direnv-zsh.sh 2>&1' | grep -cE 'not found|syntax error|unknown target' || true
             - check: the fish shell-init drop-in is baked into its conf.d and sources the direnv fish hook
               file:
                 file: /etc/fish/conf.d/charly-direnv.fish
