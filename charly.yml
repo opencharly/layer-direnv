@@ -1,31 +1,37 @@
 version: 2026.232.0520
 direnv:
     candy:
-        version: 2026.168.0935
+        version: 2026.267.2207
         description: |
             direnv — automatic per-directory environment loading from .envrc files
             direnv installs the `direnv` binary (one package name across
             fedora/arch/debian) AND declaratively wires the per-shell hook that
             makes .envrc autoload work. At `charly box build` the shell: schema
-            bakes the POSIX hook into /etc/profile.d/charly-direnv-<shell>.sh for
-            bash/zsh/sh (the generic body `eval "$(direnv hook <shell>)"` with
+            bakes the hook into /etc/profile.d/charly-direnv-<shell>.sh for
+            bash/zsh (the generic body `eval "$(direnv hook <shell>)"` with
             ${SHELL_NAME} substituted) and the fish-specific hook into
             /etc/fish/conf.d/charly-direnv.fish (`direnv hook fish | source`).
-            The scenarios assert both the installed/runnable binary AND the baked
-            hook drop-ins, so they fail if either the package or the shell wiring
-            is missing.
+            `sh` is intentionally opted OUT (`sh: {}`): upstream `direnv hook`
+            supports bash/zsh/fish/tcsh but NOT `sh`, so `direnv hook sh` errors
+            on every shell that sources it. The scenarios assert the
+            installed/runnable binary AND the baked hook drop-ins, so they fail if
+            either the package or the shell wiring is missing.
         package:
             - direnv
         # Shell hooks installed declaratively via the shell: schema (2026-05).
-        # bash/zsh/sh use the POSIX-style hook `eval "$(direnv hook X)"` — handled
+        # bash/zsh use the POSIX-style hook `eval "$(direnv hook X)"` — handled
         # by the generic body with ${SHELL_NAME} substituted at install time.
         # fish uses different syntax, so it gets a per-shell override.
+        # sh is opted OUT: `direnv hook sh` is NOT a valid direnv target (its
+        # supported shells are bash/zsh/fish/tcsh), so an empty `sh: {}` override
+        # skips the sh drop-in entirely (empty per-shell block → shell skipped).
         shell:
             init: |
                 eval "$(direnv hook ${SHELL_NAME})"
             fish:
                 init: |
                     direnv hook fish | source
+            sh: {}
         plan:
             - check: the direnv binary is installed at /usr/bin/direnv for the .envrc/.secrets autoload workflow
               file:
@@ -34,18 +40,30 @@ direnv:
             - check: direnv reports its version without error
               exit_status: 0
               command: /usr/bin/direnv version
-            - check: the bash shell-init drop-in EVALs the direnv hook so .envrc loads on directory change (a check-for-eval typo would silently break the hook and spam every login shell with a command-not-found error)
+            - check: the bash shell-init drop-in EVALs the direnv hook, guarded to bash only (the guard stops bash from running the zsh drop-in, which /etc/profile also sources)
               file:
                 # candy name is direnv, not layer-direnv — the shell: schema emits charly-direnv-*
                 file: /etc/profile.d/charly-direnv-bash.sh
                 exists: true
                 contains:
                     - 'eval "$(direnv hook bash)"'
-            - check: sourcing the bash direnv drop-in installs the hook cleanly, with no command-not-found error from a malformed check-for-eval hook body
-              id: direnv-hook-sources-clean
+                    - "BASH_VERSION"
+            - check: the zsh shell-init drop-in EVALs the direnv zsh hook, guarded to zsh only
+              file:
+                file: /etc/profile.d/charly-direnv-zsh.sh
+                exists: true
+                contains:
+                    - 'eval "$(direnv hook zsh)"'
+                    - "ZSH_VERSION"
+            - check: NO sh drop-in is baked — `direnv hook sh` is not a valid target, so the sh:{} opt-out must suppress /etc/profile.d/charly-direnv-sh.sh (a file here means the invalid hook ships and errors on every sh)
+              id: direnv-no-sh-dropin
+              exit_status: 0
+              command: test ! -e /etc/profile.d/charly-direnv-sh.sh
+            - check: the zsh drop-in is guarded to zsh — sourcing it under bash must produce zero errors (the zsh body uses zsh-only syntax, so an unguarded drop-in errors under bash; this is the observable cross-shell regression)
+              id: direnv-zsh-guard-inert-under-bash
               stdout:
                 - equals: "0"
-              command: bash -c '. /etc/profile.d/charly-direnv-bash.sh 2>&1' | grep -c 'command not found' || true
+              command: bash -c '. /etc/profile.d/charly-direnv-zsh.sh 2>&1' | grep -cE 'not found|syntax error|unknown target' || true
             - check: the fish shell-init drop-in is baked into its conf.d and sources the direnv fish hook
               file:
                 file: /etc/fish/conf.d/charly-direnv.fish
@@ -105,13 +123,14 @@ direnv-skill:
             ```yaml
             shell:
               init: |
-                eval "$(direnv hook ${SHELL_NAME})"   # bash/zsh/sh — POSIX-style
+                eval "$(direnv hook ${SHELL_NAME})"   # bash/zsh — POSIX-style
               fish:
                 init: |
                   direnv hook fish | source            # fish — different syntax
+              sh: {}                                   # sh opted OUT — direnv has no sh hook
             ```
             
-            Container images get `/etc/profile.d/charly-direnv-<shell>.sh` and `/etc/fish/conf.d/charly-direnv.fish` emitted at `charly box build` time. `target: local` host deploys get a managed-block in `~/.bashrc` / `~/.zshrc` plus `~/.config/fish/conf.d/charly-direnv.fish` at `charly fleet add` time, only for shells the runtime probe finds. The fish hook lands in `~/.config/fish/conf.d/charly-direnv.fish` (its own conf.d drop-in), so it works without editing `~/.config/fish/config.fish`.
+            Container images get `/etc/profile.d/charly-direnv-<shell>.sh` (bash/zsh only) and `/etc/fish/conf.d/charly-direnv.fish` emitted at `charly box build` time; each POSIX drop-in is runtime-guarded to its own shell because `/etc/profile` sources every `*.sh` in every POSIX login shell. `target: local` host deploys get a managed-block in `~/.bashrc` / `~/.zshrc` plus `~/.config/fish/conf.d/charly-direnv.fish` at `charly fleet add` time, only for shells the runtime probe finds. The fish hook lands in `~/.config/fish/conf.d/charly-direnv.fish` (its own conf.d drop-in), so it works without editing `~/.config/fish/config.fish`.
             
             The primary use case in OpenCharly is the `.secrets` workflow: `.envrc` calls `eval "$(charly secrets gpg env)"` which decrypts a GPG-encrypted `.secrets` file in memory and exports the variables — no plaintext on disk. No external `direnvrc` dependency needed.
             
