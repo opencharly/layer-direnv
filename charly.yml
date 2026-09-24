@@ -1,7 +1,7 @@
-version: 2026.261.1747
+version: 2026.232.0520
 direnv:
     candy:
-        version: 2026.168.0935
+        version: 2026.267.2207
         description: |
             direnv — automatic per-directory environment loading from .envrc files
             direnv installs the `direnv` binary (one package name across
