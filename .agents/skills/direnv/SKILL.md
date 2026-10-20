@@ -1,0 +1,81 @@
+---
+name: direnv
+description: 'direnv -- automatic environment variable loading from .envrc files.
+
+  Use when working with direnv, .envrc, .secrets, or environment management.'
+---
+
+# direnv -- Automatic environment variable loading
+
+## Candy Properties
+
+| Property | Value |
+|----------|-------|
+| Install files | `charly.yml` (packages only) |
+
+## Packages
+
+RPM: `direnv` · PAC: `direnv` · DEB: `direnv` — full cross-distro parity.
+
+## Usage
+
+```yaml
+# charly.yml
+my-image:
+  candy:
+    - direnv
+```
+
+Typically used as part of the `agent-forwarding` composition candy rather than directly. Also available in the heavyweight `dev-tools` candy.
+
+## Runtime Behavior
+
+Provides the `direnv` binary AND the per-shell hook installation for automatic environment variable loading from `.envrc` files.
+
+**Shell hooks are declarative.** The candy carries a `shell:` block:
+
+```yaml
+shell:
+  init: |
+    eval "$(direnv hook ${SHELL_NAME})"   # bash/zsh — POSIX-style
+  fish:
+    init: |
+      direnv hook fish | source            # fish — different syntax
+  sh: {}                                   # sh opted OUT — direnv has no sh hook
+```
+
+The emitter is VENUE-SHAPED. Container images get `/etc/profile.d/charly-direnv-<shell>.sh` (bash/zsh only) and `/etc/fish/conf.d/charly-direnv.fish` emitted at `charly box build` time; each POSIX drop-in is runtime-guarded to its own shell because `/etc/profile` sources every `*.sh` in every POSIX login shell. `target: local` host and `target: vm` guest deploys instead get a managed block in `~/.bashrc` / `~/.zshrc` plus `~/.config/fish/conf.d/charly-direnv.fish` written at `charly deploy add` time — for every shell the `shell:` block defines, with no per-host shell probe. The fish hook lands in the per-user conf.d drop-in (its own file), so it works without editing `~/.config/fish/config.fish`.
+
+**The plan asserts each venue's OWN shape.** The baked drop-ins are `context: [build]` assertions (`charly box build` artifacts); the deploy venue's wiring is one `context: [runtime]` assertion — the live mode's context, because a `check:` step scoped `context: [deploy]` is active in NEITHER check mode (`opencharly/opencharly#413`). That runtime step branches on the venue marker (`/etc/profile.d/charly-direnv-bash.sh`): an image venue must carry the baked drop-ins, a host/VM venue must carry the managed `~/.bashrc` / `~/.zshrc` blocks and the per-user fish drop-in, and the `sh:{}` opt-out must hold at both. An unscoped image-shaped assertion run in a `local:` venue is exactly the defect this shape prevents (`opencharly/layer-direnv#7`).
+
+The primary use case in OpenCharly is the `.secrets` workflow: `.envrc` calls `eval "$(charly secrets gpg env)"` which decrypts a GPG-encrypted `.secrets` file in memory and exports the variables — no plaintext on disk. No external `direnvrc` dependency needed.
+
+## Used In Boxes
+
+Part of `agent-forwarding` composition candy, used in application boxes.
+
+Also available in the `dev-tools` candy.
+
+## Related Candies
+
+- `/charly-distros:agent-forwarding` -- metalayer that includes gnupg + direnv + ssh-client
+- `/charly-infrastructure:gnupg` -- GPG tools (needed for `.secrets` decryption)
+- `/charly-coder:dev-tools` -- heavyweight candy that also includes direnv
+
+## Cross-References
+
+- `/charly-build:secrets` -- `charly secrets gpg` commands for managing `.secrets` files, `charly secrets gpg setup` for GPG agent + KeePassXC configuration, `charly secrets gpg doctor` for health checks
+
+## When to Use This Skill
+
+Use when the user asks about:
+
+- direnv or `.envrc` files
+- The `direnv` candy
+- Automatic environment variable loading
+- The `.secrets` + direnv workflow
+
+## Related
+
+- `/charly-image:layer` — candy authoring reference (`charly.yml` schema, task verbs, service declarations)
+- `/charly-check:check` — declarative testing (`check:` block, `charly check box`, `charly check live`)
